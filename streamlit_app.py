@@ -1,113 +1,152 @@
 import streamlit as st
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 import io
-import textwrap
 import gen_pub
-import json
 
-def generar_pdf(rutina_estructurada):
+def generar_pdf(rutina):
     """
-    Genera un archivo PDF con la rutina formateada de manera ordenada y precisa.
+    Genera un PDF con la rutina de entrenamiento estructurada.
+    Si no hay datos estructurados para días o ejercicios, se muestra
+    todo el contenido en el campo de "plan_alimentacion".
     """
     buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
-    y = height - 50  # Posición inicial
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    story = []
+    styles = getSampleStyleSheet()
 
     # Título
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(100, y, rutina_estructurada.get("titulo", "Sin título"))
-    y -= 20
+    story.append(Paragraph(rutina.get("titulo", "Rutina de Entrenamiento"), styles["Title"]))
+    story.append(Spacer(1, 12))
 
-    # Descripción con manejo de salto de línea
-    c.setFont("Helvetica", 12)
-    descripcion = textwrap.wrap(rutina_estructurada.get("descripcion", ""), width=80)
-    for line in descripcion:
-        c.drawString(100, y, line)
-        y -= 15
-    y -= 10
+    # Sección de Días de Entrenamiento y Ejercicios (solo si existen)
+    dias = rutina.get("dias_entrenamiento", {})
+    if dias:
+        story.append(Paragraph("Días de Entrenamiento y Ejercicios:", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+        datos_tabla = [["Día", "Ejercicio"]]
+        for dia, ejercicios in dias.items():
+            for ejercicio in ejercicios:
+                datos_tabla.append([dia, ejercicio])
+        tabla = Table(datos_tabla, colWidths=[150, 300])
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]))
+        story.append(tabla)
+        story.append(Spacer(1, 12))
 
-    # Lista de ejercicios
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(100, y, "Ejercicios:")
-    y -= 20
+    # Sección de Ejercicios Detallados (solo si existen)
+    ejercicios_list = rutina.get("ejercicios", [])
+    if ejercicios_list:
+        story.append(Paragraph("Ejercicios Detallados:", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+        for ejercicio in ejercicios_list:
+            # Se espera que cada ejercicio sea un diccionario con keys: nombre, series y repeticiones
+            texto = f"{ejercicio.get('nombre', 'Ejercicio')}: {ejercicio.get('series', '')} series de {ejercicio.get('repeticiones', '')} repeticiones"
+            story.append(Paragraph(texto, styles["Normal"]))
+            story.append(Spacer(1, 6))
 
-    c.setFont("Helvetica", 11)
-    for ejercicio in rutina_estructurada.get("ejercicios", []):
-        c.drawString(100, y, f"- {ejercicio['nombre']}")
-        y -= 15
-        c.drawString(120, y, f"Series: {ejercicio['series']}, Repeticiones: {ejercicio['repeticiones']}")
-        y -= 15
-        if y < 50:  # Nueva página si no hay espacio
-            c.showPage()
-            c.setFont("Helvetica", 11)
-            y = height - 50
+    # Sección de Plan de Alimentación o Texto completo (si no hay datos estructurados)
+    plan = rutina.get("plan_alimentacion", "")
+    if plan:
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("Plan de Alimentación:", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+        for linea in plan.split('\n'):
+            story.append(Paragraph(linea, styles["Normal"]))
+            story.append(Spacer(1, 6))
 
-    c.save()
+    doc.build(story)
     buffer.seek(0)
     return buffer
 
 def main():
     st.title("Recomendador de Rutinas de Gimnasio")
 
-    # API key (usa variables de entorno o Streamlit secrets)
+    # API key
     api_key = st.secrets.get("API_KEY")
     if not api_key:
-        st.error("La API key no está configurada. Por favor, configura la variable de entorno API_KEY.")
+        st.error("La API key no está configurada. Configura la API_KEY en secrets.toml.")
         return
 
     # Inputs del usuario
     edad = st.number_input("Edad", min_value=10, max_value=100, value=25)
+    estatura = st.number_input("Estatura en cm", min_value=100, max_value=300, value=170)
     sexo = st.selectbox("Sexo", ["Masculino", "Femenino"])
     dias_entrenamiento = st.slider("Días de entrenamiento por semana", min_value=1, max_value=7, value=3)
     tipo_alimentacion = st.selectbox("Tipo de alimentación", ["Omnívoro", "Vegetariano", "Vegano"])
     objetivo = st.selectbox("Objetivo", ["Construir músculo", "Perder peso", "Marcar musculatura"])
     gimnasio = st.checkbox("¿Tienes acceso a un gimnasio?")
-    experiencia = st.checkbox("¿Es tu primera vez en el gimnasio?")
+    experiencia = st.selectbox("Experiencia", ["Principiante", "Intermedio", "Avanzado"])
     condicion = st.text_input("¿Tienes alguna condición médica?")
 
-    # Variable para almacenar la rutina
     rutina = None
 
-    # Botón para generar la rutina
     if st.button("Generar Rutina"):
         try:
-            rutina = gen_pub.generate(edad, sexo, dias_entrenamiento, tipo_alimentacion, objetivo, gimnasio, experiencia, condicion, api_key)
-            st.session_state.rutina = rutina
+            # Llamada a la función que genera la rutina
+            rutina = gen_pub.generate(edad, estatura, sexo, dias_entrenamiento, tipo_alimentacion, objetivo, gimnasio, experiencia, condicion, api_key)
+
+            # Mostrar la respuesta generada por la IA en la interfaz de Streamlit
+            st.write("Rutina generada:", rutina)
+
+            # Si se detecta "Error" en la respuesta, se muestra el error
             if "Error" in rutina:
-                st.error(rutina)  # Mostrar el error retornado por la API
+                st.error(rutina)
             else:
-                st.write(rutina)  # Mostrar el resultado de la API para ver qué está regresando
+                # Guardar la rutina en el estado de la sesión
+                st.session_state.rutina = rutina
+                st.write("Rutina guardada en el estado:", rutina)
         except Exception as e:
             st.error(f"Ocurrió un error: {e}")
+
+    # Mostrar información de depuración sobre la estructura de la rutina
+    if st.session_state.get("rutina"):
+        st.write("Rutina en el estado de la sesión:", st.session_state.get("rutina"))
+    else:
+        st.write("No hay rutina guardada en el estado.")
 
     if st.button("Imprimir Rutina"):
         try:
             rutina = st.session_state.get("rutina", None)
-            if rutina:
-                # La rutina puede ser un string, así que hay que procesarla adecuadamente
-                if isinstance(rutina, str):  # Si la rutina es texto
-                    st.write("Respuesta de la API (en texto):")
-                    st.text(rutina)
-                    rutina_estructurada = {"titulo": "Rutina Generada", "descripcion": rutina, "ejercicios": []}
-                else:
-                    rutina_estructurada = gen_pub.analizar_rutina(rutina)
-                    st.write(rutina_estructurada)
+            st.write("Rutina en la sesión al imprimir:", rutina)  # Verifica si está disponible
 
-                # Validar antes de generar el PDF
-                if not isinstance(rutina_estructurada, dict) or not rutina_estructurada:
-                    st.error("Error: La rutina no tiene el formato correcto.")
-                else:
-                    pdf_buffer = generar_pdf(rutina_estructurada)
-                    st.download_button(
-                        label="Descargar Rutina en PDF",
-                        data=pdf_buffer,
-                        file_name="rutina.pdf",
-                        mime="application/pdf",
-                    )
+            if rutina:
+                # Si la rutina es un string, la convertimos en una estructura mínima
+                if isinstance(rutina, str):
+                    rutina_pdf = {
+                        "titulo": "Rutina de Gimnasio",
+                        "dias_entrenamiento": {},  # No hay datos estructurados de días
+                        "ejercicios": [],           # No hay lista de ejercicios separados
+                        "plan_alimentacion": rutina  # Todo el texto se muestra aquí
+                    }
+                # Si es un diccionario, usamos sus claves
+                elif isinstance(rutina, dict):
+                    rutina_pdf = {
+                        "titulo": rutina.get("titulo", "Rutina de Gimnasio"),
+                        "dias_entrenamiento": rutina.get("dias_entrenamiento", {}),
+                        "ejercicios": rutina.get("ejercicios", []),
+                        "plan_alimentacion": rutina.get("plan_alimentacion", "")
+                    }
+
+                pdf_buffer = generar_pdf(rutina_pdf)
+
+                st.download_button(
+                    label="Descargar Rutina en PDF",
+                    data=pdf_buffer,
+                    file_name="rutina.pdf",
+                    mime="application/pdf",
+                )
             else:
-                st.warning("Por favor, genera una rutina primero.")
+                st.warning("Genera una rutina primero o revisa que la rutina esté correctamente estructurada.")
         except Exception as e:
             st.error(f"Ocurrió un error al generar el PDF: {e}")
 
