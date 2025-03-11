@@ -104,15 +104,15 @@ def main():
             else:
                 # Guardar la rutina en el estado de la sesión
                 st.session_state.rutina = rutina
-                st.write("Rutina guardada en el estado:", rutina)
+                # st.write("Rutina guardada en el estado:", rutina)
         except Exception as e:
             st.error(f"Ocurrió un error: {e}")
 
-    # Mostrar información de depuración sobre la estructura de la rutina
-    if st.session_state.get("rutina"):
-        st.write("Rutina en el estado de la sesión:", st.session_state.get("rutina"))
-    else:
-        st.write("No hay rutina guardada en el estado.")
+    # # Mostrar información de depuración sobre la estructura de la rutina
+    # if st.session_state.get("rutina"):
+    #     st.write("Rutina en el estado de la sesión:", st.session_state.get("rutina"))
+    # else:
+    #     st.write("No hay rutina guardada en el estado.")
 
     if st.button("Imprimir Rutina"):
         try:
